@@ -4,12 +4,11 @@
 //! data to UDP sockets as a stream, and read data from UDP sockets as packets.
 
 use std::io::{self, ErrorKind};
+use std::net::{IpAddr, SocketAddr};
 use std::net::{ToSocketAddrs, UdpSocket};
-use std::net::{SocketAddr, IpAddr};
 
 #[cfg(not(windows))]
-use net2::unix::UnixUdpBuilderExt;
-use net2::UdpBuilder;
+use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 
 pub mod connector;
 pub mod packet;
@@ -37,36 +36,40 @@ pub fn addr_from_trait<A: ToSocketAddrs>(addr: A) -> io::Result<SocketAddr> {
 
     match sock_iter.next() {
         Some(n) => Ok(n),
-        None => Err(io::Error::new(ErrorKind::InvalidInput, "Failed To Parse SocketAddr")),
+        None => Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            "Failed To Parse SocketAddr",
+        )),
     }
 }
 
 /// Bind to a `UdpSocket`, setting `SO_REUSEADDR` on the underlying socket before binding.
 pub fn bind_reuse<A: ToSocketAddrs>(local_addr: A) -> io::Result<UdpSocket> {
-    let local_addr = try!(addr_from_trait(local_addr));
+    let local_addr = addr_from_trait(local_addr)?;
 
-    let builder = match local_addr {
-        SocketAddr::V4(_) => try!(UdpBuilder::new_v4()),
-        SocketAddr::V6(_) => try!(UdpBuilder::new_v6()),
+    let socket: Socket = match local_addr {
+        SocketAddr::V4(_) => Socket::new(Domain::ipv4(), Type::dgram(), Some(Protocol::udp()))?,
+        SocketAddr::V6(_) => Socket::new(Domain::ipv6(), Type::dgram(), Some(Protocol::udp()))?,
     };
 
-    try!(reuse_port(&builder));
-    builder.bind(local_addr)
+    reuse_port(&socket)?;
+    socket.bind(&SockAddr::from(local_addr))?;
+    Ok(socket.into_udp_socket())
 }
 
 #[cfg(windows)]
-fn reuse_port(builder: &UdpBuilder) -> io::Result<()> {
+fn reuse_port(builder: &Socket) -> io::Result<()> {
     // Allow wildcards + specific to not overlap
-    try!(builder.reuse_address(true));
+    socket.set_reuse_address(true)?;
     Ok(())
 }
 
 #[cfg(not(windows))]
-fn reuse_port(builder: &UdpBuilder) -> io::Result<()> {
+fn reuse_port(socket: &Socket) -> io::Result<()> {
     // Allow wildcards + specific to not overlap
-    try!(builder.reuse_address(true));
+    socket.set_reuse_address(true)?;
     // Allow multiple listeners on the same port
-    try!(builder.reuse_port(true));
+    socket.set_reuse_port(true)?;
     Ok(())
 }
 
@@ -75,10 +78,10 @@ pub fn join_multicast(sock: &UdpSocket, iface: &SocketAddr, mcast_addr: &IpAddr)
     match (iface, mcast_addr) {
         (&SocketAddr::V4(ref i), &IpAddr::V4(ref m)) => sock.join_multicast_v4(m, i.ip()),
         (&SocketAddr::V6(ref i), &IpAddr::V6(ref m)) => sock.join_multicast_v6(m, i.scope_id()),
-        _ => {
-            Err(io::Error::new(ErrorKind::InvalidInput,
-                               "Multicast And Interface Addresses Are Not The Same Version"))
-        }
+        _ => Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            "Multicast And Interface Addresses Are Not The Same Version",
+        )),
     }
 }
 
@@ -88,10 +91,10 @@ pub fn leave_multicast(sock: &UdpSocket, iface_addr: &SocketAddr, mcast_addr: &S
     match (iface_addr, mcast_addr) {
         (&SocketAddr::V4(ref i), &SocketAddr::V4(ref m)) => sock.leave_multicast_v4(m.ip(), i.ip()),
         (&SocketAddr::V6(ref i), &SocketAddr::V6(ref m)) => sock.leave_multicast_v6(m.ip(), i.scope_id()),
-        _ => {
-            Err(io::Error::new(ErrorKind::InvalidInput,
-                               "Multicast And Interface Addresses Are Not The Same Version"))
-        }
+        _ => Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            "Multicast And Interface Addresses Are Not The Same Version",
+        )),
     }
 }
 

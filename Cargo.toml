@@ -1,6 +1,6 @@
 [package]
 name = "ssdp"
-version = "0.7.0"
+version = "0.7.1"
 authors = ["GGist <amiller4421@gmail.com>", "Ignacio Corderi <icorderi@msn.com>"]
 description = "An asynchronous abstraction for discovering devices and services on a network."
 documentation = "http://ggist.github.io/ssdp-rs/index.html"
@@ -11,11 +11,16 @@ readme = "README.md"
 repository = "https://github.com/GGist/ssdp-rs"
 
 [dependencies]
-log = "0.3"
-net2 = "0.2.23"
+log = "0.4.6"
 time = "0.1"
-error-chain = "0.10"
+error-chain = "0.12.0"
 get_if_addrs = "0.5.3"
+
+[target.'cfg(unix)'.dependencies]
+socket2 = {version="0.3.8", features=["reuseport"]}
+
+[target.'cfg(windows)'.dependencies]
+socket2 = {version="0.3.8"}
 
 [dependencies.hyper]
 default-features = false

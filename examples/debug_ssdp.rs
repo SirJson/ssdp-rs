@@ -1,31 +1,34 @@
 extern crate log;
 extern crate ssdp;
 
-use log::{Log, LogRecord, LogLevelFilter, LogMetadata};
+use log::{LevelFilter, Log, Metadata, Record, SetLoggerError};
 
 use ssdp::header::{HeaderMut, Man, MX, ST};
-use ssdp::message::{SearchRequest, Multicast};
+use ssdp::message::{Multicast, SearchRequest};
 
 struct SimpleLogger;
 
 impl Log for SimpleLogger {
-    fn enabled(&self, _: &LogMetadata) -> bool {
+    fn enabled(&self, _: &Metadata) -> bool {
         true
     }
 
-    fn log(&self, record: &LogRecord) {
+    fn log(&self, record: &Record) {
         if self.enabled(record.metadata()) {
             println!("{} - {}", record.level(), record.args());
         }
     }
+    fn flush(&self) {}
+}
+
+static LOGGER: SimpleLogger = SimpleLogger;
+
+pub fn init_logger() -> Result<(), SetLoggerError> {
+    log::set_logger(&LOGGER).map(|()| log::set_max_level(LevelFilter::Info))
 }
 
 fn main() {
-    log::set_logger(|max_level| {
-        max_level.set(LogLevelFilter::Debug);
-        Box::new(SimpleLogger)
-    })
-        .unwrap();
+    init_logger().unwrap();
 
     // Create Our Search Request
     let mut request = SearchRequest::new();

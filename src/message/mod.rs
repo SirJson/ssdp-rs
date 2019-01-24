@@ -6,18 +6,18 @@ use std::net::SocketAddr;
 use net::connector::UdpConnector;
 use net::IpVersionMode;
 
+pub mod listen;
+pub mod multicast;
 mod notify;
 mod search;
 mod ssdp;
-pub mod listen;
-pub mod multicast;
 
 use get_if_addrs;
 
-pub use message::multicast::Multicast;
-pub use message::search::{SearchRequest, SearchResponse, SearchListener};
-pub use message::notify::{NotifyMessage, NotifyListener};
 pub use message::listen::Listen;
+pub use message::multicast::Multicast;
+pub use message::notify::{NotifyListener, NotifyMessage};
+pub use message::search::{SearchListener, SearchRequest, SearchResponse};
 
 /// Multicast Socket Information
 pub const UPNP_MULTICAST_IPV4_ADDR: &'static str = "239.255.255.250";
@@ -45,6 +45,38 @@ pub struct Config {
     pub port: u16,
     pub ttl: u32,
     pub mode: IpVersionMode,
+}
+
+trait IpProperties {
+    fn is_global_addr(&self) -> bool;
+}
+
+impl IpProperties for std::net::Ipv4Addr {
+    fn is_global_addr(&self) -> bool {
+        // globally routable addresses in the 192.0.0.0/24 range.
+        if u32::from(*self) == 0xc000_0009 || u32::from(*self) == 0xc000_000a {
+            return true;
+        }
+        !self.is_private()
+            && !self.is_loopback()
+            && !self.is_link_local()
+            && !self.is_broadcast()
+            && !self.is_documentation()
+            // Make sure the address is not in 0.0.0.0/8
+            && self.octets()[0] != 0
+    }
+}
+
+impl IpProperties for std::net::Ipv6Addr {
+    fn is_global_addr(&self) -> bool {
+        !self.is_multicast()
+            && !self.is_loopback()
+            && !(self.segments()[0] & 0xffc0) == 0xfe80
+            && !(self.segments()[0] & 0xffc0) == 0xfec0
+            && !(self.segments()[0] & 0xfe00) == 0xfc00
+            && !self.is_unspecified()
+            && !((self.segments()[0] == 0x2001) && (self.segments()[1] == 0xdb8))
+    }
 }
 
 impl Config {
@@ -94,12 +126,12 @@ impl Default for Config {
 fn all_local_connectors(multicast_ttl: Option<u32>, filter: &IpVersionMode) -> io::Result<Vec<UdpConnector>> {
     trace!("Fetching all local connectors");
     map_local(|&addr| match (filter, addr) {
-        (&IpVersionMode::V4Only, SocketAddr::V4(n)) |
-        (&IpVersionMode::Any, SocketAddr::V4(n)) => {
+        (&IpVersionMode::V4Only, SocketAddr::V4(n)) | (&IpVersionMode::Any, SocketAddr::V4(n)) => {
             Ok(Some(try!(UdpConnector::new((*n.ip(), 0), multicast_ttl))))
         }
-        (&IpVersionMode::V6Only, SocketAddr::V6(n)) |
-        (&IpVersionMode::Any, SocketAddr::V6(n)) => Ok(Some(try!(UdpConnector::new(n, multicast_ttl)))),
+        (&IpVersionMode::V6Only, SocketAddr::V6(n)) | (&IpVersionMode::Any, SocketAddr::V6(n)) => {
+            Ok(Some(try!(UdpConnector::new(n, multicast_ttl))))
+        }
         _ => Ok(None),
     })
 }
@@ -108,7 +140,8 @@ fn all_local_connectors(multicast_ttl: Option<u32>, filter: &IpVersionMode) -> i
 ///
 /// This method filters out _loopback_ and _global_ addresses.
 fn map_local<F, R>(mut f: F) -> io::Result<Vec<R>>
-    where F: FnMut(&SocketAddr) -> io::Result<Option<R>>
+where
+    F: FnMut(&SocketAddr) -> io::Result<Option<R>>,
 {
     let addrs_iter = try!(get_local_addrs());
 
@@ -123,7 +156,7 @@ fn map_local<F, R>(mut f: F) -> io::Result<Vec<R>>
                 }
             }
             // Filter all loopback and global IPv6 addresses
-            SocketAddr::V6(n) if !n.ip().is_loopback() && !n.ip().is_global() => {
+            SocketAddr::V6(n) if !n.ip().is_loopback() && !n.ip().is_global_addr() => {
                 if let Some(x) = try!(f(&addr)) {
                     obj_list.push(x);
                 }
@@ -140,6 +173,7 @@ fn map_local<F, R>(mut f: F) -> io::Result<Vec<R>>
 /// If any of the `SocketAddr`'s fail to resolve, this function will not return an error.
 fn get_local_addrs() -> io::Result<Vec<SocketAddr>> {
     let iface_iter = try!(get_if_addrs::get_if_addrs()).into_iter();
-    Ok(iface_iter.filter_map(|iface| Some(SocketAddr::new(iface.addr.ip(), 0)))
+    Ok(iface_iter
+        .filter_map(|iface| Some(SocketAddr::new(iface.addr.ip(), 0)))
         .collect())
 }

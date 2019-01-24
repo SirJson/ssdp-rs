@@ -1,5 +1,4 @@
 #![allow(unused_features)]
-#![feature(ip)]
 #![recursion_limit = "1024"]
 
 //! An asynchronous abstraction for discovering devices and services on a network.
@@ -12,9 +11,9 @@
 extern crate hyper;
 #[macro_use]
 extern crate log;
-extern crate time;
 extern crate get_if_addrs;
-extern crate net2;
+extern crate socket2;
+extern crate time;
 #[macro_use]
 extern crate error_chain;
 
@@ -26,7 +25,7 @@ mod receiver;
 pub mod header;
 pub mod message;
 
-pub use error::{SSDPError, SSDPErrorKind, SSDPResultExt, SSDPResult};
+pub use error::{SSDPError, SSDPErrorKind, SSDPResult, SSDPResultExt};
 pub use field::FieldMap;
-pub use receiver::{SSDPReceiver, SSDPIter};
 pub use net::IpVersionMode;
+pub use receiver::{SSDPIter, SSDPReceiver};
